@@ -1,0 +1,50 @@
+# Single repo-wide ignore file -- patterns without a leading "/" match at
+# any depth, so they cover both Voice-agent-backend/ and the frontend.
+
+# --- Secrets / local config ---------------------------------------------------
+.env
+.env.*
+!.env.example
+
+# --- Python -------------------------------------------------------------------
+.venv/
+venv311/
+venv_main/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# --- Node / frontend build ----------------------------------------------------
+node_modules/
+dist/
+dist-ssr/
+*.local
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# --- Editors / OS -------------------------------------------------------------
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# --- Claude Code (local, per-developer) ---------------------------------------
+.claude/
+CLAUDE.md
+
+# --- Local data ----------------------------------------------------------------
+# Voice-reference audio exported from a running instance -- real recordings,
+# never commit.
+Voice-agent-backend/voice_references_backup/

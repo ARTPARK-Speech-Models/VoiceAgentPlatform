@@ -1,0 +1,184 @@
+services:
+  mcp-server:
+    build: ./MCP
+    container_name: "mcp"
+    networks:
+      - agent-net
+    restart: unless-stopped
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - DATA_GOV_IN_API_KEY=${DATA_GOV_IN_API_KEY}
+
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 3G
+        reservations:
+          memory: 1G
+    mem_limit: 3g
+    memswap_limit: 3g
+    ports:
+      - "8002:8002"
+    volumes:
+      - chroma_data:/app/chroma_data
+
+  # ==========================================
+  # Orchestrator — CPU only, lightweight relay
+  # ==========================================
+  orchestrator:
+    build: ./Orchestrator
+    container_name: orchestrator
+    ports:
+      - "8000:8000"
+    environment:
+      - FIREBASE_SERVICE_ACCOUNT_JSON=${FIREBASE_SERVICE_ACCOUNT_JSON}
+      - HF_TOKEN=${HF_TOKEN}
+      - DATABASE_URL=${DATABASE_URL}
+      - CORS_ORIGINS=${CORS_ORIGINS:-}
+      - APP_CHECK_ENFORCE=${APP_CHECK_ENFORCE:-false}
+      - DHVAANI_API_BASE=${DHVAANI_API_BASE}
+      - DHVAANI_API_KEY=${DHVAANI_API_KEY}
+      - OLLAMA_API_BASE=${OLLAMA_API_BASE}
+      - OLLAMA_API_KEY=${OLLAMA_API_KEY}
+      - SRAVAANI_API_BASE=${SRAVAANI_API_BASE}
+      - SRAVAANI_API_KEY=${SRAVAANI_API_KEY}
+    depends_on:
+      - mcp-server
+
+    networks:
+      - agent-net
+    restart: unless-stopped
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - asr-model-cache:/root/.cache/huggingface
+      - voice-reference-data:/app/data/voice_references
+      # Call recordings (issue #29) -- a real docker volume, not an
+      # ephemeral container path, so a rebuild/redeploy doesn't wipe past
+      # recordings. See src/recordings.py.
+      - call-recordings:/app/call_recordings
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 8G
+        reservations:
+          memory: 4G
+    mem_limit: 8g
+    memswap_limit: 8g
+
+  # ==========================================
+  # SraVaani-1.0 ASR — standalone service, CPU
+  # (see Orchestrator/sravaani_service.py's own docstring: same pattern
+  # as dhvaani_service.py. Reuses the already-built orchestrator image
+  # (same deps: torch, transformers, fastapi) instead of a separate
+  # build -- just a different entrypoint command.)
+  # ==========================================
+  sravaani:
+    image: voice-agent-backend-orchestrator
+    container_name: sravaani
+    command: ["uvicorn", "sravaani_service:app", "--host", "0.0.0.0", "--port", "8002"]
+    environment:
+      - HF_TOKEN=${HF_TOKEN}
+      - SRAVAANI_API_KEY=${SRAVAANI_API_KEY}
+    depends_on:
+      - orchestrator
+    networks:
+      - agent-net
+    restart: unless-stopped
+    volumes:
+      - asr-model-cache:/root/.cache/huggingface
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 4G
+        reservations:
+          memory: 1G
+    mem_limit: 4g
+    memswap_limit: 4g
+
+  # ==========================================
+  # DhVaani TTS — standalone service, CPU
+  # (see Orchestrator/dhvaani_service.py's own docstring: same reuse-the-
+  # orchestrator-image pattern as sravaani -- just a different entrypoint.)
+  # Disabled by default -- enable it to run DhVaani TTS in this stack
+  # instead of on a separate host.
+  # ==========================================
+  # dhvaani:
+  #   image: voice-agent-backend-orchestrator
+  #   container_name: dhvaani
+  #   command: ["uvicorn", "dhvaani_service:app", "--host", "0.0.0.0", "--port", "8001"]
+  #   environment:
+  #     - HF_TOKEN=${HF_TOKEN}
+  #     - DHVAANI_API_KEY=${DHVAANI_API_KEY}
+  #   depends_on:
+  #     - orchestrator
+  #   networks:
+  #     - agent-net
+  #   restart: unless-stopped
+  #   volumes:
+  #     - asr-model-cache:/root/.cache/huggingface
+  #     - dhvaani-tts-cache:/app/data/tts_cache
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "1.0"
+  #         memory: 4G
+  #       reservations:
+  #         memory: 1G
+  #   mem_limit: 4g
+  #   memswap_limit: 4g
+
+  # ==========================================
+  # Ollama — local LLM serving, CPU
+  # Official image. OllamaLLM (Orchestrator/LLM/ollama.py) talks to its
+  # OpenAI-compatible /v1/chat/completions endpoint -- no auth gate needed
+  # here (OLLAMA_API_KEY only mattered for the external nginx proxy this
+  # replaces). Pull models after first start, e.g.:
+  #   docker exec ollama ollama pull gemma3:4b
+  # gemma4:e4b (per Orchestrator/scripts/seed_catalog.py's comments) needs
+  # ~9.6GB Q4 -- raise the memory limit below before pulling it.
+  # Disabled for now -- scaffolded but not live in production yet.
+  # ==========================================
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   container_name: ollama
+  #   networks:
+  #     - agent-net
+  #   restart: unless-stopped
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #   deploy:
+  #     resources:
+  #       limits:
+  #         cpus: "2.0"
+  #         memory: 6G
+  #       reservations:
+  #         memory: 1G
+  #   mem_limit: 6g
+  #   memswap_limit: 6g
+
+
+networks:
+  agent-net:
+    driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: 1400
+
+volumes:
+  asr-model-cache:
+    driver: local
+  chroma_data:
+    driver: local
+  voice-reference-data:
+    driver: local
+  call-recordings:
+    driver: local
+  # dhvaani-tts-cache and ollama-data: only used by the disabled dhvaani/
+  # ollama services above -- uncomment together with those.
+  # dhvaani-tts-cache:
+  #   driver: local
+  # ollama-data:
+  #   driver: local

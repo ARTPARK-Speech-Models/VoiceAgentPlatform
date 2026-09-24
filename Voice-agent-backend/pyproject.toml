@@ -1,0 +1,42 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+exclude = ["venv_main", ".venv", "venv311", "*/F5tts/*"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes (unused imports/vars, undefined names, etc.)
+    "I",   # isort (import ordering)
+    "UP",  # pyupgrade (modern Python idioms)
+    "B",   # bugbear (common bug patterns)
+]
+ignore = [
+    "E501",  # line length -- already covered loosely by line-length above, don't hard-fail on it
+]
+
+[tool.ruff.lint.per-file-ignores]
+# E402 (import not at top) is deliberate in these -- code must run before the
+# imports below it, and hoisting them would break things:
+#   conftest.py   sets DATABASE_URL to the test DB before anything imports
+#                 src.database.engine (which builds its engine at import time)
+#   alembic/env.py  sets sys.path + loads .env before importing src.*
+#   engine.py     calls load_dotenv() before reading DATABASE_URL
+"Orchestrator/tests/conftest.py" = ["E402"]
+"Orchestrator/alembic/env.py" = ["E402"]
+"Orchestrator/src/database/engine.py" = ["E402"]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection idiom *requires* these in argument defaults,
+# so B008 (function-call-in-default-argument) is a false positive for them.
+extend-immutable-calls = [
+    "fastapi.Depends",
+    "fastapi.Body",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Query",
+    "fastapi.Path",
+    "fastapi.Header",
+    "fastapi.Cookie",
+    "fastapi.Security",
+]
